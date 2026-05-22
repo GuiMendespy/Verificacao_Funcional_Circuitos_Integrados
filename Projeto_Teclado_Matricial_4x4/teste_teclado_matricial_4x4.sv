@@ -25,7 +25,7 @@ module tb_teclado;
 
     // Gerador de clock
     initial clk = 0;
-    always #1 clk = ~clk;
+    always #0.5 clk = ~clk;
     
     bit [3:0] num;
 
@@ -95,7 +95,7 @@ module tb_teclado;
 
         rst = 1;
         enable = 1; 
-        #10; 
+        repeat(5) @(posedge clk);
         rst = 0; 
         if (DEBUG) $display("[DEBUG TB] Reset finalizado.");
 
@@ -125,13 +125,13 @@ module tb_teclado;
         repeat(5) begin
             $display("\n------------------------------------------------");
             teste_decodificar_teclado();
-            #50; 
+            repeat(50) @(posedge clk);
         end
 
         $display("\n================================================");
         $display("=== FIM DA MARATONA DE TESTES ===");
 
-        #100;
+        @repeat(100) @(posedge clk);
         $display("=== FIM DA SIMULACAO ===");
         $finish;
     end
