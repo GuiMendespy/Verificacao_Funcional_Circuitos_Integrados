@@ -1,4 +1,5 @@
 `timescale 1ns/1ps
+`define DEBUG 0
 
 // Garanta que a struct esteja visível no testbench.
 // Se o seu pacote real tiver outro nome, descomente e use o seu original.
@@ -43,7 +44,7 @@ module tb_teclado;
             4'd3    : col_matriz = 4'b1110;
             default : col_matriz = 4'b1111; 
         endcase
-        $display("[DEBUG TB] Coluna injetada pelo teste: %b (Sorteio num=%0d)", col_matriz, num);
+        if (DEBUG) $display("[DEBUG TB] Coluna injetada pelo teste: %b (Sorteio num=%0d)", col_matriz, num);
     endtask
 
     function bit [3:0] descobrir_digito_esperado();
@@ -51,7 +52,7 @@ module tb_teclado;
         digito_local = 4'hF; 
 
         // Adicionado um display para você ver o que o DUT está enviando de linha
-        $display("[DEBUG TB] Analisando pinos atuais -> Linha: %b | Coluna: %b", lin_matriz, col_matriz);
+        if (DEBUG) $display("[DEBUG TB] Analisando pinos atuais -> Linha: %b | Coluna: %b", lin_matriz, col_matriz);
 
         if (lin_matriz == 4'b0111) begin 
             if      (col_matriz == 4'b0111) digito_local = 4'h1;
@@ -96,7 +97,7 @@ module tb_teclado;
         enable = 1; 
         #10; 
         rst = 0; 
-        $display("[DEBUG TB] Reset finalizado.");
+        if (DEBUG) $display("[DEBUG TB] Reset finalizado.");
 
         repeat(5) @(posedge clk);
         varrer_coluna();
@@ -104,8 +105,8 @@ module tb_teclado;
         repeat(5) @(posedge clk);
 
         esperado = descobrir_digito_esperado();
-        $display("[DEBUG TB] Resultado calculado pelo modelo de teste: %X", esperado);
-        $display("[DEBUG TB] Valor atual na saída do DUT: %X", digitos_value.digits[0]);
+        if (DEBUG) $display("[DEBUG TB] Resultado calculado pelo modelo de teste: %X", esperado);
+        if (DEBUG) $display("[DEBUG TB] Valor atual na saída do DUT: %X", digitos_value.digits[0]);
 
         if (digitos_value.digits[0] === esperado) begin
             $display("[SUCESSO] Teste de decodificação realizado! Injetado Hex: %X", esperado);
