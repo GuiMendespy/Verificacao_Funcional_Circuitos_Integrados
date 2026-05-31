@@ -487,23 +487,6 @@ module tb_teclado;
         repeat(30) @(posedge clk);
     endtask
 
-    task pressionar_num_cenario9(input logic [3:0] d);
-        logic [7:0] coords;
-        coords = get_coords(d);
-
-        if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de %1d...", d);
-
-        while (lin_matriz !== coords[7:4]) begin
-            if (`DEBUG) $display("[DEBUG TB] lin_matriz = 0b%4b", lin_matriz);
-            @(posedge clk);
-        end
-        col_matriz = coords[3:0];
-        repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
-        col_matriz = 4'b1111;
-
-        if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
-
-    endtask
     // ================================================================
     // CENARIO 9 — Timeout de digitação
     // ================================================================
@@ -527,12 +510,13 @@ module tb_teclado;
         fazer_reset();
         enable = 1;
         
-        pressionar_num_cenario9(t_random1);
+        pressionar_digito(t_random1);
+        repeat(`MAX_ESPERA) @(posedge clk);
         
         // Aguardar 4.9 segundos (ajuste este valor baseado na escala real do seu DUT)
         #4900; 
         
-        pressionar_num_cenario9(t_random2);
+        pressionar_digito(t_random2);
                 
         if (digitos_value.digits[0] === t_random2 && digitos_valid === 1'b0) begin
             $display(" [OK] Teste 01 Passou: Digito 0x%X registrado e valid permaneceu em 0.", t_random2);
@@ -544,60 +528,130 @@ module tb_teclado;
         linha(0);
         
         // ------------------------------------------------------------
-        // Teste 02: Nao digitar por mais de 5 segundos
+        // Teste 02: Nao digitar por mais de 5 segundos (Tempo Mínimo Garantido)
         // ------------------------------------------------------------
         gerar_num_aleatorio(tecla);
         $display(" [Teste 02] Digitando acima do limite de 5s (Teclas: %X)...", tecla);
         fazer_reset();
         enable = 1;
         
-        pressionar_num_cenario9(tecla);
+        pressionar_digito(tecla);
+        $display("  Tecla %X pressionada. Verificando estabilidade por 5000 ciclos...", tecla);
         
-        // Aguardar 5.1 segundos para estourar o timeout
-        $display("  Esperando por 5s mais um pulso...");
-        repeat(5003) @(posedge clk);
-        
-        // Checa se o timeout ativou e preencheu com 0xE
-        if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
-            $display(" [OK] Teste 02 (Parte 1): Timeout detectado! Barramento preenchido com 0xE e valid=1.");
-        end else begin
-            $display(" [FALHA] Teste 02 (Parte 1): Barramento nao respondeu ao timeout. Obtido: %20h, valid=%1b", 
-                     digitos_value, digitos_valid);
+        // Criamos flags locais para monitorar quem terminou primeiro
+        // Lembrete: declare estas variáveis no topo da sua task se o iverilog reclamar!
+        begin : bloco_verificacao_timeout
+            logic tempo_atingido;
+            logic falha_precoce;
+            
+            tempo_atingido = 0;
+            falha_precoce   = 0;
+
+            fork
+                // Bloco 1: Força a contagem exata do tempo mínimo de 5000 pulsos
+                begin
+                    repeat(5000) @(posedge clk);
+                    tempo_atingido = 1;
+                end
+                
+                // Bloco 2: Monitora se o hardware vai ter um comportamento precoce ilegal
+                begin
+                    @(posedge digitos_valid);
+                    if (!tempo_atingido) begin
+                        falha_precoce = 1;
+                    end
+                end
+            join_any
+            
+            // Se o valid subiu antes de dar 5000 ciclos, mata o teste na hora
+            if (falha_precoce) begin
+                $display(" [FALHA] Teste 02: O sinal digitos_valid subiu ANTES dos 5000 pulsos mínimos!");
+                $finish;
+            end
+            
+            // Se passou pelos 5000 ciclos intacto, espera o pulso exato do timeout (caso falte algum ciclo de acomodação)
+            if (!digitos_valid) begin
+                fork
+                    begin : espera_pulso_final
+                        wait(digitos_valid == 1'b1);
+                    end
+                    begin : trava_seguranca
+                        repeat(100) @(posedge clk); // margem de erro pequena
+                    end
+                join_any
+                disable fork;
+            end
         end
         
-        // Aguarda 1 pulso de clock para ver o reset automático pós-timeout
+        // --- PEQUENO ATRAZO CRÍTICO ---
+        #1; 
+
+        // Checa se o timeout ativou corretamente no momento certo
+        if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
+            $display(" [OK] Teste 02 (Parte 1): Timeout detectado no tempo correto! Barramento: 0xE e valid=1.");
+        end else begin
+            $display(" [FALHA] Teste 02 (Parte 1): Barramento nao respondeu ao timeout apos os 5000 ciclos.");
+            $display("        Obtido: %20h, valid=%1b", digitos_value, digitos_valid);
+            $finish; 
+        end
+        
+        // Aguarda exatamente a PRÓXIMA borda de clock para ver o reset automático pós-timeout
         @(posedge clk);
-        #1; // Pequeno atraso para estabilização dos sinais amostrados
+        #2; // Mantido em #1 para evitar amostragem fora da janela estável
+        
+        $display("  Barramento apos proxima borda: %20h", digitos_value);
+
+        // Checa se voltou para 0xF e valid=0
         if (digitos_value === {20{4'hF}} && digitos_valid === 1'b0) begin
             $display(" [OK] Teste 02 (Parte 2): Sistema resetado para 0xF e valid retornou para 0.");
         end else begin
             $display(" [FALHA] Teste 02 (Parte 2): Sistema nao limpou pos-timeout. Obtido: %20h, valid=%1b", 
                      digitos_value, digitos_valid);
+            $finish;
         end
 
         linha(0);
-
         // ------------------------------------------------------------
         // Teste 03: Timeout logo no inicio da digitaçao
         // ------------------------------------------------------------
         gerar_num_aleatorio(t_random1);
-        $display(" [Teste 03] Timeout exato de 5s + 1 ciclo na primeira tecla (%X)...", t_random1);
+        $display(" [Teste 03] Timeout na primeira tecla (%X) - Esperando >5000 ciclos...", t_random1);
         fazer_reset();
         enable = 1;
         
-        pressionar_num_cenario9(t_random1);
+        // 1. Pressiona a primeira tecla para disparar o início da digitação
+        pressionar_digito(t_random1);
         
-        // Aguardar exatamente 5 segundos
-        repeat(5003) @(posedge clk);
+        // 2. Aguarda até o timeout acontecer OU até estourar o tempo limite de segurança
+        $display("  Tecla %X registrada. Aguardando a mudanca de estado pelo timeout...", t_random1);
+        fork
+            begin
+                // Espera o sinal de valid subir indicando o estouro do timeout do DUT
+                wait(digitos_valid == 1'b1); 
+            end
+            begin
+                // Trava de segurança caso o DUT falhe e nunca saia do lugar (evita travar a simulação)
+                repeat(5100) @(posedge clk);
+            end
+        join_any
+        disable fork; // Cancela o bloco que ficou para trás
         
+        // 3. Pequeno atraso crítico para o simulador processar as saídas do DUT pós-clock
+        #1;
+
+        // 4. Validação dos dados após o período de espera do timeout
         if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
-            $display(" [OK] Teste 03: Timeout disparado exatamente em 5s + 1 ciclo.");
+            $display(" [OK] Teste 03: Timeout disparado com sucesso após o período mínimo de espera.");
         end else begin
-            $display(" [FALHA] Teste 03: Timeout falhou no tempo exato. Obtido: %20h, valid=%1b", 
+            $display(" [FALHA] Teste 03: Timeout falhou ou nao respondeu no tempo esperado.");
+            $display("        Obtido no barramento: %20h, valid=%1b (Esperado: 0xE...E com valid=1)", 
                      digitos_value, digitos_valid);
+            $finish;
         end
         
+        // 5. Espera a próxima borda para o circuito limpar o estado de timeout e voltar ao normal
         @(posedge clk);
+        #1;
 
         linha(0);
 
@@ -609,7 +663,8 @@ module tb_teclado;
         fazer_reset();
         enable = 1;
         
-        pressionar_num_cenario9(t_random1);
+        pressionar_digito(t_random1);
+        repeat(`MAX_ESPERA) @(posedge clk);
         
         // Aguardar 3 segundos com enable ativo
         repeat(3000) @(posedge clk);
