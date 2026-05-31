@@ -54,7 +54,6 @@ module tb_teclado;
 
     task pressionar_digito(input logic [3:0] d);
         logic [7:0] coords;
-        logic [3:0] ant;
         coords = get_coords(d);
 
         if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de %1d...", d);
@@ -66,15 +65,6 @@ module tb_teclado;
         col_matriz = coords[3:0];
         repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
         col_matriz = 4'b1111;
-        ant = digitos_value.digits[0];
-        fork
-            begin
-                wait (ant != digitos_value.digits[0]);
-            end
-            begin
-                repeat(`MAX_ESPERA) @(posedge clk); 
-            end
-        join_any
 
         if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
     endtask
@@ -175,6 +165,7 @@ module tb_teclado;
             gerar_num_aleatorio(num);
 
             pressionar_digito(num);
+            repeat(`MAX_ESPERA) @(posedge clk);
 
             if (digitos_value.digits[0] != num) begin
                 $display("[FALHA] Esperado: %X, Obtido: %X", num, digitos_value.digits[0]);
@@ -208,6 +199,8 @@ module tb_teclado;
             digito_atual = i % 10;
             sequencia_esperada = (sequencia_esperada << 4) | digito_atual;
             pressionar_digito(digito_atual);
+            repeat(`MAX_ESPERA) @(posedge clk);
+
             $display(" Digitando %1d...           %20h", digito_atual, digitos_value);
             if (digitos_value != sequencia_esperada) begin
                 $display("%20h = %20h : %1b", digitos_value, sequencia_esperada, digitos_value == sequencia_esperada);
@@ -226,6 +219,7 @@ module tb_teclado;
             sequencia_esperada = (sequencia_esperada << 4) | digito_atual;
 
             pressionar_digito(digito_atual);
+            repeat(`MAX_ESPERA) @(posedge clk);
 
             $display(" Digitando %1d...           %20h", digito_atual, digitos_value);
             if (digitos_value != sequencia_esperada) begin
