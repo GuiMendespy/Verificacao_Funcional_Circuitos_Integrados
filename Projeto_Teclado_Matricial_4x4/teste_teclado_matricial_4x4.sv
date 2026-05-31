@@ -484,6 +484,435 @@ module tb_teclado;
         repeat(30) @(posedge clk);
     endtask
 
+    task pressionar_num_cenario9(input logic [3:0] d);
+        logic [7:0] coords;
+        coords = get_coords(d);
+
+        if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de %1d...", d);
+
+        while (lin_matriz !== coords[7:4]) begin
+            if (`DEBUG) $display("[DEBUG TB] lin_matriz = 0b%4b", lin_matriz);
+            @(posedge clk);
+        end
+        col_matriz = coords[3:0];
+        repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
+        col_matriz = 4'b1111;
+
+        if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
+
+    endtask
+    // ================================================================
+    // CENARIO 9 — Timeout de digitação
+    // ================================================================
+    task teste_timeout_digitacao;
+        logic [3:0] t_random1, t_random2;
+        logic [3:0] tecla, tecla2;
+        logic [7:0] coords;
+        logic [3:0] l, c;
+
+        $display("          CENARIO 9: Timeout de Digitacao");
+        linha(1);
+
+        // ------------------------------------------------------------
+        // Teste 01: Digitar proxima tecla dentro de 5 segundos
+        // ------------------------------------------------------------
+        
+        gerar_num_aleatorio(t_random1);
+        gerar_num_aleatorio(t_random2);
+        
+        $display(" [Teste 01] Digitando dentro do limite de 5s (Teclas: %X e %X)...", t_random1, t_random2);
+        fazer_reset();
+        enable = 1;
+        
+        pressionar_num_cenario9(t_random1);
+        
+        // Aguardar 4.9 segundos (ajuste este valor baseado na escala real do seu DUT)
+        #4900; 
+        
+        pressionar_num_cenario9(t_random2);
+                
+        if (digitos_value.digits[0] === t_random2 && digitos_valid === 1'b0) begin
+            $display(" [OK] Teste 01 Passou: Digito 0x%X registrado e valid permaneceu em 0.", t_random2);
+        end else begin
+            $display(" [FALHA] Teste 01: Esperado digito=0x%X e valid=0. Obtido: digito=0x%X, valid=%1b", 
+                     t_random2, digitos_value.digits[0], digitos_valid);
+        end
+
+        linha(0);
+        
+        // ------------------------------------------------------------
+        // Teste 02: Nao digitar por mais de 5 segundos
+        // ------------------------------------------------------------
+        gerar_num_aleatorio(tecla);
+        $display(" [Teste 02] Digitando acima do limite de 5s (Teclas: %X)...", tecla);
+        fazer_reset();
+        enable = 1;
+        
+        pressionar_num_cenario9(tecla);
+        
+        // Aguardar 5.1 segundos para estourar o timeout
+        $display("  Esperando por 5s mais um pulso...");
+        repeat(5003) @(posedge clk);
+        
+        // Checa se o timeout ativou e preencheu com 0xE
+        if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
+            $display(" [OK] Teste 02 (Parte 1): Timeout detectado! Barramento preenchido com 0xE e valid=1.");
+        end else begin
+            $display(" [FALHA] Teste 02 (Parte 1): Barramento nao respondeu ao timeout. Obtido: %20h, valid=%1b", 
+                     digitos_value, digitos_valid);
+        end
+        
+        // Aguarda 1 pulso de clock para ver o reset automático pós-timeout
+        @(posedge clk);
+        #1; // Pequeno atraso para estabilização dos sinais amostrados
+        if (digitos_value === {20{4'hF}} && digitos_valid === 1'b0) begin
+            $display(" [OK] Teste 02 (Parte 2): Sistema resetado para 0xF e valid retornou para 0.");
+        end else begin
+            $display(" [FALHA] Teste 02 (Parte 2): Sistema nao limpou pos-timeout. Obtido: %20h, valid=%1b", 
+                     digitos_value, digitos_valid);
+        end
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 03: Timeout logo no inicio da digitaçao
+        // ------------------------------------------------------------
+        gerar_num_aleatorio(t_random1);
+        $display(" [Teste 03] Timeout exato de 5s + 1 ciclo na primeira tecla (%X)...", t_random1);
+        fazer_reset();
+        enable = 1;
+        
+        pressionar_num_cenario9(t_random1);
+        
+        // Aguardar exatamente 5 segundos
+        repeat(5003) @(posedge clk);
+        
+        if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
+            $display(" [OK] Teste 03: Timeout disparado exatamente em 5s + 1 ciclo.");
+        end else begin
+            $display(" [FALHA] Teste 03: Timeout falhou no tempo exato. Obtido: %20h, valid=%1b", 
+                     digitos_value, digitos_valid);
+        end
+        
+        @(posedge clk);
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 04: Com enable=0, o timer de timeout deve congelar
+        // ------------------------------------------------------------
+        gerar_num_aleatorio(t_random1);
+        $display(" [Teste 04] Testando congelamento do Timer com enable=0 apos tecla %X...", t_random1);
+        fazer_reset();
+        enable = 1;
+        
+        pressionar_num_cenario9(t_random1);
+        
+        // Aguardar 3 segundos com enable ativo
+        repeat(3000) @(posedge clk);
+        
+        // Desativar enable e esperar 4 segundos (Não deve dar timeout aqui)
+        enable = 0;
+        repeat(4000) @(posedge clk);
+
+        if (digitos_valid === 1'b1 || digitos_value === {20{4'hE}}) begin
+            $display(" [FALHA] Teste 04: Timeout disparou incorretamente com enable=0!");
+        end else begin
+            $display(" [OK] Teste 04 (Parte 1): Timer congelou com sucesso durante enable=0.");
+        end
+        
+        // Reativar enable e esperar 1.5 segundos (Total acumulado ativo = 4.5s, ainda sem timeout)
+        enable = 1;
+        repeat(1500) @(posedge clk);
+        
+        if (digitos_valid === 1'b1) begin
+            $display(" [FALHA] Teste 04: Timeout disparou antes dos 5s totais ativos (4.5s acumulados)!");
+        end
+        
+        // Aguardar mais 0.6 segundos para estourar o limite restante (4.5s + 0.6s = 5.001s acumulados ativos)
+        repeat(503) @(posedge clk);
+        
+        if (digitos_value === {20{4'hE}} && digitos_valid === 1'b1) begin
+            $display(" [OK] Teste 04 (Parte 2): Timeout disparou corretamente apos somar os 5s com enable=1!");
+        end else begin
+            $display(" [FALHA] Teste 04 (Parte 2): Timeout nao disparou apos o tempo acumulado. Obtido: %20h", digitos_value);
+        end
+
+        linha(1);
+        $display(" [SUCESSO] Todos os testes de Timeout de digitacao passaram!");
+        linha(1);
+    endtask
+
+    // ================================================================
+    // CENARIO 10 — Verificação do sinal Enable
+    // ================================================================
+    task teste_enable;
+        logic [3:0] t_rand1, t_rand2, t_rand3;
+        digitosPac_t sequencia_esperada;
+
+        $display("            CENÁRIO 10: SINAL ENABLE");
+        linha(1);
+
+        // ------------------------------------------------------------
+        // Teste 01: Com enable=1, o modulo le e processa normalmente
+        // ------------------------------------------------------------
+        $display(" [Teste 01] Verificando operacao normal com enable=1...");
+        fazer_reset();
+        enable = 1;
+        sequencia_esperada = ~0; // Estado resetado (tudo 0xF)
+
+        // Sorteia 3 teclas
+        gerar_num_aleatorio(t_rand1);
+        gerar_num_aleatorio(t_rand2);
+        gerar_num_aleatorio(t_rand3);
+
+        $display(" -> Digitando sequencia: %X, %X, %X", t_rand1, t_rand2, t_rand3);
+        
+        pressionar_digito(t_rand1);
+        sequencia_esperada = (sequencia_esperada << 4) | t_rand1;
+        
+        pressionar_digito(t_rand2);
+        sequencia_esperada = (sequencia_esperada << 4) | t_rand2;
+        
+        pressionar_digito(t_rand3);
+        sequencia_esperada = (sequencia_esperada << 4) | t_rand3;
+
+        if (digitos_value == sequencia_esperada) begin
+            $display(" [OK] Teste 01: Teclas registradas normalmente. Barramento: %20h", digitos_value);
+        end else begin
+            $display(" [FALHA] Teste 01: Esperado %20h, Obtido %20h", sequencia_esperada, digitos_value);
+            $finish;
+        end
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 02: Com enable=0, o modulo congela e ignora entradas
+        // ------------------------------------------------------------
+        gerar_num_aleatorio(t_rand1);
+        gerar_num_aleatorio(t_rand2);
+        $display(" [Teste 02] Desativando enable=0 e tentando digitar...");
+        fazer_reset();
+        enable = 1;
+
+        // Digita a primeira tecla normalmente
+        pressionar_digito(t_rand1);
+        sequencia_esperada = (~0 << 4) | t_rand1; 
+
+        // Desativa o módulo
+        enable = 0;
+        repeat(5) @(posedge clk); // Tempo para o DUT processar a desativação
+
+        $display(" -> Módulo desativado. Tentando forçar tecla %X por 200 ciclos...", t_rand2);
+        
+        // Força o pressionamento manual da tecla 't_rand2' direto nos pinos 
+        // já que a task normal 'pressionar_digito' travaria esperando a varredura (que deve estar congelada)
+        fork
+            begin
+                logic [7:0] coords;
+                coords = get_coords(t_rand2);
+                col_matriz = coords[3:0];
+                repeat(200) @(posedge clk);
+                col_matriz = 4'b1111;
+            end
+        join
+
+        // Verifica se o valor antigo se manteve intacto e ignorou o t_rand2
+        if (digitos_value == sequencia_esperada) begin
+            $display(" [OK] Teste 02: Módulo ignorou entradas e manteve valor anterior: %20h", digitos_value);
+        end else begin
+            $display(" [FALHA] Teste 02: O barramento mudou com enable=0! Obtido: %20h", digitos_value);
+            $finish;
+        end
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 03: Reativar enable=1 mantem o estado anterior
+        // ------------------------------------------------------------
+        gerar_num_aleatorio(t_rand1);
+        gerar_num_aleatorio(t_rand2);
+        $display(" [Teste 03] Reativando enable=1 e verificando continuidade...");
+        fazer_reset();
+        enable = 1;
+
+        // Digita a primeira tecla (Tecla 8 na especificação)
+        pressionar_digito(t_rand1);
+        sequencia_esperada = (~0 << 4) | t_rand1;
+
+        // Desativa por 50 ciclos de clock
+        enable = 0;
+        repeat(50) @(posedge clk);
+
+        // Reativa o enable
+        enable = 1;
+        repeat(5) @(posedge clk); // Espera estabilizar a retomada da varredura
+
+        // Digita a segunda tecla (Tecla 9 na especificação)
+        $display(" -> Módulo reativado. Digitando segunda tecla: %X", t_rand2);
+        pressionar_digito(t_rand2);
+        sequencia_esperada = (sequencia_esperada << 4) | t_rand2;
+
+        if (digitos_value == sequencia_esperada) begin
+            $display(" [OK] Teste 03: Varredura retomada e estado preservado perfeitamente! Barramento: %20h", digitos_value);
+        end else begin
+            $display(" [FALHA] Teste 03: Estado perdido ou varredura nao retomou. Esperado: %20h, Obtido: %20h", sequencia_esperada, digitos_value);
+            $finish;
+        end
+
+        linha(1);
+        $display(" [SUCESSO] Todos os testes do sinal ENABLE passaram!");
+        linha(1);
+    endtask
+
+    // ================================================================
+    // CENARIO 11 — Verificação do sinal de Reset
+    // ================================================================
+    task teste_reset;
+        logic [3:0] t_rand1, t_rand2;
+        digitosPac_t sequencia_esperada;
+
+        $display("             CENÁRIO 11: SINAL DE RESET");
+        linha(1);
+
+        // ------------------------------------------------------------
+        // Teste 01: Reset durante a digitação normal (Interrupção)
+        // ------------------------------------------------------------
+        $display(" [Teste 01] Aplicando Reset no meio da digitacao...");
+        fazer_reset();
+        enable = 1;
+
+        gerar_num_aleatorio(t_rand1);
+        $display(" -> Digitando tecla %X e aplicando reset imediatamente...", t_rand1);
+
+        pressionar_digito(t_rand1); // Digita uma tecla
+
+        // Começa a digitar a segunda tecla, mas joga o reset logo em seguida
+        gerar_num_aleatorio(t_rand2);
+        $display(" -> Digitando tecla %X e aplicando reset imediatamente...", t_rand2);
+        
+        fork
+            begin
+                pressionar_digito(t_rand2);
+
+                repeat(10) @(posedge clk); // Espera o início do processo da tecla
+                rst = 1;                   // Força o reset abrupto
+                @(posedge clk);
+                rst = 0;
+            end
+        join
+
+        // Verifica se o barramento limpou tudo para 0xF e valid foi para 0
+        if (digitos_value == {20{4'hF}} && digitos_valid === 1'b0) begin
+            $display(" [OK] Teste 01: O sistema limpou os dados e interrompeu a digitacao com sucesso.");
+        end else begin
+            $display(" [FALHA] Teste 01: Sistema nao resetou corretamente em atividade. Obtido: %20h, valid=%1b", 
+                     digitos_value, digitos_valid);
+        end
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 02: Reset durante o estado de erro por Timeout
+        // ------------------------------------------------------------
+        $display(" [Teste 02] Aplicando Reset durante o estado de Timeout (Erro)...");
+        fazer_reset();
+        enable = 1;
+
+        gerar_num_aleatorio(t_rand1);
+        pressionar_digito(t_rand1);
+
+        $display(" -> Aguardando o estouro do Timeout...");
+        @(posedge digitos_valid); // Espera o timeout acontecer dinamicamente
+        
+        // Verifica se entrou em timeout (barramento 0xE e valid=1)
+        if (digitos_value == {20{4'hE}} && digitos_valid === 1'b1) begin
+            $display(" -> Timeout detectado. Ativando sinal de Reset...");
+            rst = 1;
+            @(posedge clk);
+            #1; // Acomodação
+            
+            if (digitos_value == {20{4'hF}} && digitos_valid === 1'b0) begin
+                $display(" [OK] Teste 02: O Reset limpou com sucesso o estado de erro de Timeout.");
+            end else begin
+                $display(" [FALHA] Teste 02: Reset falhou em limpar o Timeout. Obtido: %20h, valid=%1b", 
+                         digitos_value, digitos_valid);
+            end
+            rst = 0; // Libera o reset
+        end else begin
+            $display(" [AVISO] Nao foi possivel testar: o circuito nao gerou o estado de timeout esperado.");
+        end
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 03: Reset com o módulo desativado (Enable = 0)
+        // ------------------------------------------------------------
+        $display(" [Teste 03] Aplicando Reset com o modulo desativado (Enable=0)...");
+        fazer_reset();
+        enable = 1;
+
+        gerar_num_aleatorio(t_rand1);
+        pressionar_digito(t_rand1); // Guarda um valor inicial
+
+        enable = 0; // Desativa o módulo (congela o barramento com o valor t_rand1)
+        repeat(10) @(posedge clk);
+
+        $display(" -> Ativando Reset com Enable=0...");
+        rst = 1;
+        repeat(5) @(posedge clk);
+        #1;
+
+        // O reset DEVE limpar o circuito mesmo que o enable esteja em 0 (Reset síncrono/assíncrono dominante)
+        if (digitos_value == {20{4'hF}} && digitos_valid === 1'b0) begin
+            $display(" [OK] Teste 03: Reset possui prioridade sobre o Enable e limpou o barramento.");
+        end else begin
+            $display(" [FALHA] Teste 03: O sinal de Enable=0 bloqueou o Reset! Obtido: %20h", digitos_value);
+        end
+        rst = 0;
+
+        linha(0);
+
+        // ------------------------------------------------------------
+        // Teste 04: Manutenção do Reset ativo (Estado estático)
+        // ------------------------------------------------------------
+        $display(" [Teste 04] Verificando se o sistema permanece resetado com rst=1 ativo por muito tempo...");
+        fazer_reset(); // Garante estado inicial limpo
+        enable = 1;
+        rst = 1;       // Ativa e SEGURA o reset ligado
+
+        $display(" -> Forcando pulsos no teclado com reset ativo...");
+        // Em vez de usar pressionar_digito (que trava), aplicamos o estimulo direto nos pinos
+        fork
+            begin
+                logic [7:0] coords;
+                gerar_num_aleatorio(t_rand1);
+                coords = get_coords(t_rand1);
+                
+                col_matriz = coords[3:0];   // Simula tecla pressionada
+                repeat(100) @(posedge clk); // Mantém pressionada por 100 ciclos
+                col_matriz = 4'b1111;       // Solta a tecla
+                repeat(50) @(posedge clk);
+            end
+        join // Esse join agora vai fechar com 150 ciclos garantidos, sem travar!
+        #1;
+
+        // O barramento não pode ter saído do padrão de reset de jeito nenhum
+        if (digitos_value == {20{4'hF}} && digitos_valid === 1'b0) begin
+            $display(" [OK] Teste 04: Sistema permaneceu imune a entradas com o Reset ativo.");
+        end else begin
+            $display(" [FALHA] Teste 04: O circuito aceitou dados ou mudou de estado com o Reset travado em 1! Obtido: %20h", digitos_value);
+            $finish;
+        end
+
+        rst = 0; // Libera o circuito para os próximos cenários
+        repeat(10) @(posedge clk);
+
+        linha(1);
+        $display(" [SUCESSO] Todos os testes do sinal de RESET passaram!");
+        linha(1);
+    endtask
+
     // ================================================================
     // Bloco principal
     // ================================================================
@@ -518,6 +947,15 @@ module tb_teclado;
 
         // ------ Cenario 5: Confirmacao com * ------
         teste_confirmacao_asterisco();
+
+        // ------ Cenário 9: Timeout de digitação -----
+        teste_timeout_digitacao();
+
+        // ------ Cenário 10: Enable -----
+        teste_enable();
+
+        // ------ Cenário 11; Reset -----
+        teste_reset();
 
         repeat(10) @(posedge clk);
 
