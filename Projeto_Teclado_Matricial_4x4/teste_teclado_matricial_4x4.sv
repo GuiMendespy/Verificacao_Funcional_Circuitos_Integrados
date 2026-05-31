@@ -55,6 +55,7 @@ module tb_teclado;
     task pressionar_digito(input logic [3:0] d);
         logic [7:0] coords;
         coords = get_coords(d);
+        logic [3:0] ant;
 
         if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de %1d...", d);
 
@@ -65,9 +66,15 @@ module tb_teclado;
         col_matriz = coords[3:0];
         repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
         col_matriz = 4'b1111;
-        repeat(`MAX_ESPERA) @(posedge clk);
-        // esperamos o máximo sempre para garantir
-        // que os dados vão está no barramento
+        ant = digitos_value.digitos[0];
+        fork
+            begin
+                wait (ant != digitos_value.digitos[0]);
+            end
+            begin
+                repeat(`MAX_ESPERA) @(posedge clk); 
+            end
+        join_any
 
         if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
     endtask
