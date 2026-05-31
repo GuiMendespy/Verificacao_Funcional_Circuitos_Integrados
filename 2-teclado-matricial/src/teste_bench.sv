@@ -54,8 +54,8 @@ module tb_teclado;
 
     task pressionar_digito(input logic [3:0] d);
         logic [7:0] coords;
-        coords = get_coords(d);
         logic [3:0] ant;
+        coords = get_coords(d);
 
         if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de %1d...", d);
 
@@ -66,10 +66,10 @@ module tb_teclado;
         col_matriz = coords[3:0];
         repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
         col_matriz = 4'b1111;
-        ant = digitos_value.digitos[0];
+        ant = digitos_value.digits[0];
         fork
             begin
-                wait (ant != digitos_value.digitos[0]);
+                wait (ant != digitos_value.digits[0]);
             end
             begin
                 repeat(`MAX_ESPERA) @(posedge clk); 
@@ -89,6 +89,16 @@ module tb_teclado;
         repeat(`MAX_ESPERA) @(posedge clk);
 
         if (`DEBUG) $display("[DEBUG TB] Confirmamento finalizado.");
+    endtask
+
+    task pressionar_hashtag;
+        if (`DEBUG) $display("[DEBUG TB] Iniciando pressionamento de #...");
+        while (lin_matriz !== 4'b1110) @(posedge clk);
+        col_matriz = 4'b1101;
+        repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
+        col_matriz = 4'b1111;
+        repeat(`MAX_ESPERA) @(posedge clk);
+        if (`DEBUG) $display("[DEBUG TB] Pressionamento de # finalizado.");
     endtask
 
     task fazer_reset;
@@ -492,6 +502,274 @@ module tb_teclado;
     endtask
 
     // ================================================================
+    // CENARIO 6 — Preenchimento com F
+    // ================================================================
+    task teste_preenchimento_F;
+        integer n_digitos;
+        bit [3:0] digito_digitado;
+        integer erros;
+
+        $display("        CENARIO 6: Preenchimento com F");
+        linha(1);
+
+        fazer_reset();
+        $display(" Verificando estado inicial apos reset...");
+        erros = 0;
+        for (int i = 0; i < 20; i++) begin
+            if (digitos_value[i*4 +: 4] !== 4'hF) begin
+                $display(" [FALHA] digits[%0d] = 0x%X (esperado 0xF)", i, digitos_value[i*4 +: 4]);
+                erros++;
+            end
+        end
+        if (erros == 0)
+            $display(" [SUCESSO] Inicializado com 20 posicoes em 0xF");
+        else
+            $display(" [FALHA] %0d posicoes nao estao em 0xF apos reset.", erros);
+
+        for (int t = 0; t < 5; t++) begin
+            linha(1);
+            fazer_reset();
+            n_digitos = $urandom_range(5, 19);
+            $display(" Teste %0d/5: Digitando %0d digitos...", t+1, n_digitos);
+            linha(0);
+
+            for (int k = 0; k < n_digitos; k++) begin
+                gerar_num_aleatorio(digito_digitado);
+                pressionar_digito(digito_digitado);
+
+                $display(" Apos %02d digito(s):        %20h", k+1, digitos_value);
+
+                erros = 0;
+                for (int j = k+1; j < 20; j++) begin
+                    if (digitos_value[j*4 +: 4] !== 4'hF) begin
+                        $display(" [FALHA] digits[%0d] = 0x%X (esperado 0xF)", j, digitos_value[j*4 +: 4]);
+                        erros++;
+                    end
+                end
+                if (erros == 0)
+                    $display(" [OK] Posicoes %0d a 19 estao com 0xF", k+1);
+                else
+                    $display(" [FALHA] %0d posicao(oes) invalida(s)", erros);
+            end
+        end
+
+        linha(1);
+    endtask
+
+    // ================================================================
+    // CENARIO 7 — Limpeza do barramento
+    // ================================================================
+    task teste_limpeza_barramento;
+        bit [3:0] digito_aleatorio;
+        integer n_digitos;
+        integer ciclos;
+        integer erros;
+
+        $display("       CENARIO 7: Limpeza do barramento");
+        linha(1);
+
+        for (int t = 0; t < 5; t++) begin
+            fazer_reset();
+            n_digitos = $urandom_range(1, 30);
+            $display(" Rodada %0d/5: Digitando %0d digito(s)...", t+1, n_digitos);
+            linha(0);
+
+            for (int k = 0; k < n_digitos; k++) begin
+                gerar_num_aleatorio(digito_aleatorio);
+                pressionar_digito(digito_aleatorio);
+            end
+
+            $display(" Value antes de confirmar: %20h", digitos_value);
+            $display(" Pressionando * e aguardando digitos_valid...");
+
+            while (lin_matriz !== 4'b1110) @(posedge clk);
+            col_matriz = 4'b0111;
+
+            ciclos = 0;
+            while (!digitos_valid && ciclos < 300) begin
+                @(posedge clk);
+                ciclos++;
+            end
+
+            if (ciclos >= 300) begin
+                $display(" [FALHA] valid nao subiu apos 300 ciclos!");
+                col_matriz = 4'b1111;
+                repeat(20) @(posedge clk);
+            end else begin
+                $display(" [OK] valid subiu em %0d ciclos!", ciclos);
+                col_matriz = 4'b1111;
+                @(negedge digitos_valid);
+                $display(" [OK] Borda de descida de valid detectada!");
+                repeat(5) @(posedge clk);
+
+                erros = 0;
+                for (int i = 0; i < 20; i++) begin
+                    if (digitos_value[i*4 +: 4] !== 4'hF) begin
+                        $display(" [FALHA] digits[%0d] = 0x%X (esperado 0xF)", i, digitos_value[i*4 +: 4]);
+                        erros++;
+                    end
+                end
+                if (erros == 0)
+                    $display(" [SUCESSO] Barramento limpo com 0xF!");
+                else
+                    $display(" [FALHA] %0d posicao(oes) nao foram resetadas.", erros);
+            end
+
+            linha(1);
+        end
+
+        $write("\x1b[1A");
+
+        linha(1);
+    endtask
+
+    // ================================================================
+    // CENARIO 8 — Tecla de desistência #
+    // ================================================================
+    task teste_hashtag;
+        bit [3:0] digito_aleatorio;
+        integer n_digitos;
+        integer ciclos;
+        integer erros_b;
+        integer erros_f;
+
+        $display("      CENARIO 8: Tecla de desistencia #");
+        linha(1);
+
+        fazer_reset();
+        n_digitos = 0;
+        $display(" Caso 1: Sem digitos (barramento = Fs)");
+        linha(0);
+        $display(" Barramento antes do #: %20h", digitos_value);
+
+        while (lin_matriz !== 4'b1110) @(posedge clk);
+        col_matriz = 4'b1101;
+        ciclos = 0;
+        while (!digitos_valid && ciclos < 300) begin
+            @(posedge clk);
+            ciclos++;
+        end
+        if (ciclos >= 300) begin
+            $display(" [FALHA] digitos_valid nao subiu!");
+            col_matriz = 4'b1111;
+            repeat(20) @(posedge clk);
+        end else begin
+            erros_b = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hB) erros_b++;
+            if (digitos_valid && erros_b == 0)
+                $display(" [SUCESSO] Barramento com 0xB e valid ativo!");
+            else
+                $display(" [FALHA] digitos_valid=%0b erros_barramento_B=%0d", digitos_valid, erros_b);
+
+            col_matriz = 4'b1111;
+            @(negedge digitos_valid);
+            $display(" [OK] Borda de descida de valid detectada!");
+            repeat(5) @(posedge clk);
+
+            erros_f = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hF) erros_f++;
+            if (erros_f == 0)
+                $display(" [SUCESSO] Barramento retornou para 0xF!");
+            else
+                $display(" [FALHA] %0d posicao(oes) nao estao em 0xF.", erros_f);
+        end
+        linha(1);
+
+        fazer_reset();
+        n_digitos = $urandom_range(1, 19);
+        $display(" Caso 2: Menos de 20 digitos (%0d digito(s))", n_digitos);
+        linha(0);
+        for (int k = 0; k < n_digitos; k++) begin
+            gerar_num_aleatorio(digito_aleatorio);
+            pressionar_digito(digito_aleatorio);
+        end
+        $display(" Barramento antes do #: %20h", digitos_value);
+
+        while (lin_matriz !== 4'b1110) @(posedge clk);
+        col_matriz = 4'b1101;
+        ciclos = 0;
+        while (!digitos_valid && ciclos < 300) begin
+            @(posedge clk);
+            ciclos++;
+        end
+        if (ciclos >= 300) begin
+            $display(" [FALHA] digitos_valid nao subiu!");
+            col_matriz = 4'b1111;
+            repeat(20) @(posedge clk);
+        end else begin
+            erros_b = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hB) erros_b++;
+            if (digitos_valid && erros_b == 0)
+                $display(" [SUCESSO] Barramento com 0xB e valid ativo!");
+            else
+                $display(" [FALHA] digitos_valid=%0b erros_barramento_B=%0d", digitos_valid, erros_b);
+
+            col_matriz = 4'b1111;
+            @(negedge digitos_valid);
+            $display(" [OK] Borda de descida de valid detectada!");
+            repeat(5) @(posedge clk);
+
+            erros_f = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hF) erros_f++;
+            if (erros_f == 0)
+                $display(" [SUCESSO] Barramento retornou para 0xF!");
+            else
+                $display(" [FALHA] %0d posicao(oes) nao estao em 0xF.", erros_f);
+        end
+        linha(1);
+
+        fazer_reset();
+        n_digitos = $urandom_range(20, 30);
+        $display(" Caso 3: 20 ou mais digitos (%0d digito(s))", n_digitos);
+        linha(0);
+        for (int k = 0; k < n_digitos; k++) begin
+            gerar_num_aleatorio(digito_aleatorio);
+            pressionar_digito(digito_aleatorio);
+        end
+        $display(" Barramento antes do #: %20h", digitos_value);
+
+        while (lin_matriz !== 4'b1110) @(posedge clk);
+        col_matriz = 4'b1101;
+        ciclos = 0;
+        while (!digitos_valid && ciclos < 300) begin
+            @(posedge clk);
+            ciclos++;
+        end
+        if (ciclos >= 300) begin
+            $display(" [FALHA] digitos_valid nao subiu!");
+            col_matriz = 4'b1111;
+            repeat(20) @(posedge clk);
+        end else begin
+            erros_b = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hB) erros_b++;
+            if (digitos_valid && erros_b == 0)
+                $display(" [SUCESSO] Barramento com 0xB e valid ativo!");
+            else
+                $display(" [FALHA] valid=%0b erros_barramento_B=%0d", digitos_valid, erros_b);
+
+            col_matriz = 4'b1111;
+            @(negedge digitos_valid);
+            $display(" [OK] Borda de descida de valid detectada!");
+            repeat(5) @(posedge clk);
+
+            erros_f = 0;
+            for (int i = 0; i < 20; i++)
+                if (digitos_value[i*4 +: 4] !== 4'hF) erros_f++;
+            if (erros_f == 0)
+                $display(" [SUCESSO] Barramento retornou para 0xF!");
+            else
+                $display(" [FALHA] %0d posicao(oes) nao estao em 0xF.", erros_f);
+        end
+
+        linha(1);
+    endtask
+
+    // ================================================================
     // Bloco principal
     // ================================================================
 
@@ -500,6 +778,7 @@ module tb_teclado;
         if (!$value$plusargs("seed=%d", seed))
             seed = 42;
 
+        void'($urandom(seed));
         if (`DEBUG) $display("=== SEMENTE ALEATORIA ATIVADA: %0d ===", seed);
 
         $dumpfile("teste_teclado.vcd");
@@ -525,6 +804,15 @@ module tb_teclado;
 
         // ------ Cenario 5: Confirmacao com * ------
         teste_confirmacao_asterisco();
+
+        // ------ Cenario 6: Preenchimento com F ------
+        teste_preenchimento_F();
+
+        // ------ Cenario 7: Limpeza do barramento ------
+        teste_limpeza_barramento();
+
+        // ------ Cenario 8: Tecla # ------
+        teste_hashtag();
 
         repeat(10) @(posedge clk);
 
