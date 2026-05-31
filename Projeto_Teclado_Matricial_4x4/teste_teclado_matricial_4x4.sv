@@ -67,16 +67,14 @@ module tb_teclado;
         repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
         col_matriz = 4'b1111;
         ant = digitos_value.digitos[0];
-        fork : espera
+        fork
             begin
                 wait (ant != digitos_value.digitos[0]);
-                disable espera;
             end
             begin
-                for (int i = 0; i < `MAX_ESPERA; i++) @(posedge clk);
-                disable espera;
+                repeat(`MAX_ESPERA) @(posedge clk); 
             end
-        join
+        join_any
 
         if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
     endtask
