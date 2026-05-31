@@ -65,9 +65,7 @@ module tb_teclado;
         col_matriz = coords[3:0];
         repeat(`DEBOUNCE_PRESSIONAMENTO) @(posedge clk);
         col_matriz = 4'b1111;
-        repeat(`MAX_ESPERA) @(posedge clk);
-        // esperamos o máximo sempre para garantir
-        // que os dados vão está no barramento
+
 
         if (`DEBUG) $display("[DEBUG TB] Pressionamento finalizado.");
     endtask
@@ -159,6 +157,8 @@ module tb_teclado;
 
             pressionar_digito(num);
 
+            repeat(`MAX_ESPERA) @(posedge clk);
+
             if (digitos_value.digits[0] != num) begin
                 $display("[FALHA] Esperado: %X, Obtido: %X", num, digitos_value.digits[0]);
                 $finish;
@@ -191,6 +191,8 @@ module tb_teclado;
             digito_atual = i % 10;
             sequencia_esperada = (sequencia_esperada << 4) | digito_atual;
             pressionar_digito(digito_atual);
+            repeat(`MAX_ESPERA) @(posedge clk);
+
             $display(" Digitando %1d...           %20h", digito_atual, digitos_value);
             if (digitos_value != sequencia_esperada) begin
                 $display("%20h = %20h : %1b", digitos_value, sequencia_esperada, digitos_value == sequencia_esperada);
@@ -209,6 +211,7 @@ module tb_teclado;
             sequencia_esperada = (sequencia_esperada << 4) | digito_atual;
 
             pressionar_digito(digito_atual);
+            repeat(`MAX_ESPERA) @(posedge clk);
 
             $display(" Digitando %1d...           %20h", digito_atual, digitos_value);
             if (digitos_value != sequencia_esperada) begin
